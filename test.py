@@ -33,7 +33,6 @@ df = pd.read_csv("onlinefoods.csv")
 
 class AgentResponseSchema(BaseModel):
     answer: str = Field(description="The direct answer derived from the DataFrame analysis.")
-    isChart: bool = Field(description="A boolean indicating whether a chart is necessary to represent the answer visually.")
     chartPrompt: str = Field(description="If a chart is necessary, this field provides details on what the chart should represent, including the best possible title.")
 
 
@@ -52,20 +51,85 @@ prompt = ChatPromptTemplate(
     },
 )
 
-chat_model = ChatOpenAI(
-    model="gpt-3.5-turbo",
-    openai_api_key=os.getenv("OPENAI_API_KEY"),
-    max_tokens=1000
-)
 
-user_query = "Give me a summary of the data in the DataFrame."
 
-_input = prompt.format_prompt(question=user_query)
 
-output = chat_model(_input.to_messages())
-parsed = parser.parse(output.content)
-print(output.content)
-print(parsed)
+
+
+# chat_model = ChatOpenAI(
+#     model="gpt-3.5-turbo",
+#     openai_api_key=os.getenv("OPENAI_API_KEY"),
+#     max_tokens=1000
+# )
+
+# user_query = "Give me a summary of the data in the DataFrame."
+
+# _input = prompt.format_prompt(question=user_query)
+
+# output = chat_model(_input.to_messages())
+
+
+# parsed = parser.parse(output.content)
+# print(output.content)
+# print(parsed)
+
+
+
+
+
+# TEST 2: api response handler
+# import re
+# import json
+
+# def escape_for_json_markdown(original_text):
+#     # Escape backslashes first to avoid double escaping later characters
+#     escaped_text = original_text.replace('\\', '\\\\')
+    
+#     # Escape double quotes
+#     escaped_text = escaped_text.replace('"', '\\"')
+    
+#     # Replace newlines with \n to preserve them in the JSON string
+#     escaped_text = escaped_text.replace('\n', '\\n')
+    
+#     # Escape backticks by doubling them (specific to your Markdown processor's requirements)
+#     escaped_text = escaped_text.replace('`', '``')
+    
+#     return escaped_text
+
+# response = '''{ "answer": "222", "chartPrompt": "" } { "answer": "222", "chartPrompt": "" }'''
+# response = '''{ "answer": "222", "chartPrompt": "" } There are 222 males in the dataframe.'''
+# # response = '''5```json
+# # {
+# #     "answer": "5",
+# #     "chartPrompt": ""
+# # }
+# # ```'''
+# response= '''{"answer": "To create an Axios request in JavaScript, you can use the Axios library which simplifies the process of making HTTP requests. First, you need to include Axios in your project either via a CDN or by installing it using npm. Then, you can use Axios to make GET, POST, PUT, DELETE, etc. requests to a server. Here is a basic example of making a GET request using Axios:\n\n```javascript\naxios.get('https://api.example.com/data')\n  .then(function (response) {\n    // handle success\n    console.log(response.data);\n  })\n  .catch(function (error) {\n    // handle error\n    console.log(error);\n  });\n```","chartPrompt": ""}'''
+
+# # Regex pattern to match a JSON-like substring
+# # pattern = r'\{[^\{]*?\}'
+# pattern = r'''\{\s*"answer":\s*".*?",\s*"chartPrompt":\s*".*?"\s*\}'''
+# # pattern = r'\{.*\}'
+
+# # Search for the pattern in the response
+# match = re.search(pattern, response, re.DOTALL)
+
+# # Extract the matched JSON-like substring
+# json_substring = match.group(0) if match else None
+# print(json_substring)
+# # json_substring = escape_for_json_markdown(json_substring)
+
+# # Convert the JSON-like substring to a dictionary if it was found
+# if json_substring:
+#     parsed = parser.parse(json_substring.replace("```", "PLACEHOLDER_FOR_TRIPLE_BACKTICKS"))
+#     parsed.answer = parsed.answer.replace("PLACEHOLDER_FOR_TRIPLE_BACKTICKS", "```")
+#     print(parsed)
+# else:
+#     print("No JSON-like substring found.")
+
+
+
+
 
 
 

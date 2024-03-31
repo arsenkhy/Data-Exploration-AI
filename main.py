@@ -14,13 +14,16 @@ import altair as alt
 from pathlib import Path
 from PIL import Image
 import helper 
+import logging
 import json
+import time
 
 from langchain import hub
 from langchain_openai import ChatOpenAI
 from langchain_experimental.agents import create_pandas_dataframe_agent
 from langchain.agents.agent_types import AgentType
 from langchain.prompts import ChatPromptTemplate, HumanMessagePromptTemplate
+from langchain_core.messages import ChatMessage
 from langchain.output_parsers import PydanticOutputParser
 from pydantic import BaseModel, Field
 from typing import List
@@ -36,17 +39,17 @@ st.set_page_config(
     initial_sidebar_state="collapsed",
     layout="wide")
 
-llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo-0613")
-
 st.title('Dataset Exploration')
 
-def create_agent_safely(llm, df):
+def create_agent_safely(df):
     try:
         if df is not None:
+            llm = ChatOpenAI(temperature=0, model="gpt-3.5-turbo")
             agent = create_pandas_dataframe_agent(llm,
                                                 df,
                                                 verbose=True,
-                                                agent_type=AgentType.OPENAI_FUNCTIONS)
+                                                agent_type=AgentType.OPENAI_FUNCTIONS,
+                                                handle_parsing_errors=True,)
             return agent
         else:
             raise ValueError("DataFrame is not defined.")
@@ -54,76 +57,66 @@ def create_agent_safely(llm, df):
         st.error(f"An error occurred: {e}")
         return None
     
+
+
+
+class AgentResponseSchema(BaseModel):
+    answer: str = Field(description="The direct answer derived from your the DataFrame analysis. Must be in markdown format")
+    chartPrompt: str = Field(description="If asked to create chart or visualize data, this field provides details on what the chart should represent in detail, including the best possible title. If no chart is necessary, leave this field empty.")
+
+parser = PydanticOutputParser(pydantic_object=AgentResponseSchema)
+
 def create_chat_prompt(chat_history, user_question):
-    instructions = """
-        For every single query, you must provide a direct answer in a dictionary format:
-        {"answer": "", "isChart": "", "chartPrompt": ""}
-        This dictionary should include keys for the answer text ('answer'), a boolean indicating if a chart is
-        needed ('isChart'), and a chart prompt with the best possible title for the chart if a
-        chart is needed ('chartPrompt').
+    chat_messages: List[ChatMessage] = [ChatMessage(role=chat_item["role"], content=chat_item["content"]) for chat_item in chat_history]
 
-        Examples:
+    prompt = ChatPromptTemplate(
+        messages= chat_messages + [
+            HumanMessagePromptTemplate.from_template(
+                "answer this user question as best as possible. You must return answer using these format instructions\n{format_instructions}\n{question}"
+            )
+        ],
+        input_variables=["question"],
+        partial_variables={
+            "format_instructions": parser.get_format_instructions(),
+        },
+    )
 
-        Query: How many rows are in the dataset?
-        Your Response: {"answer": "There are 12 rows", "isChart": "False", "chartPrompt": ""}
+    input_messages = prompt.format_prompt(question=user_question).to_messages()
 
-        Context: The dataset contains information about the GDP growth in the United States.
-        Query: Show the trend of GDP growth in the United States over the last decade.
-        Your Response: {"answer": "Please refer to the chart below.", "isChart": "True", "chartPrompt": "Plot a line chart showing the GDP growth of the United States. Title: 'Decade Trend of GDP Growth in the United States'"}
+    return {"input": input_messages}
 
-        Context: The dataset does not contain information about the GDP growth in the United States.
-        Query: Show the trend of GDP growth in the United States over the last decade.
-        Your Response: {"answer": "Sorry, this dataset does not have enough information", "isChart": "False", "chartPrompt": ""}
-        """
+def parse_response(response_text) -> AgentResponseSchema:
+    # Sometimes the JSON-like substring is not valid JSON, so need to extract it manually
+    pattern = r'''\{\s*"answer":\s*".*?",\s*"chartPrompt":\s*".*?"\s*\}'''
+    match = re.search(pattern, response_text)
+    json_substring = match.group(0) if match else None
 
-    chat_messages: List[ChatMessage] = [ChatMessage(role=chat_item["role"], message=chat_item["content"]) for chat_item in chat_history]
-    print(chat_messages)
+    if json_substring:
+        try: 
+            # Workaround for triple backticks in the response
+            agentResponse = parser.parse(json_substring.replace("```", "PLACEHOLDER_FOR_TRIPLE_BACKTICKS"))
+            agentResponse.answer = agentResponse.answer.replace("PLACEHOLDER_FOR_TRIPLE_BACKTICKS", "```")
+            return agentResponse
+        except Exception as e:
+            logging.error("Parsing response error: %s", str(e))
+            error_message = "Sorry, cannot process the given prompt"
+            return AgentResponseSchema(answer=error_message, isChart=False, chartPrompt="")
+    else:  
+        return AgentResponseSchema(answer=response_text, isChart=False, chartPrompt="")
     
-    formatted_chat = instructions + "\n\nChat history:\n"
 
-    # Iterate over chat history items and format each
-    for chat_item in chat_history:
-        role = chat_item["role"]
-        content = chat_item["content"]
-        formatted_chat += f"{role.title()}: {content}\n"
-
-    # Add the new user question
-    formatted_chat += f"User question: {user_question}"
-
-    return formatted_chat
-
-
-
-def escape_special_chars_in_json(json_string):
-    # Dictionary mapping special characters to their escaped versions
-    chars_to_escape = {
-        "\n": "\\n",
-        "\r": "\\r",
-        "\t": "\\t",
-        "\b": "\\b",
-        "\f": "\\f"
-    }
-    
-    # Iterate through the dictionary and replace each character in the string
-    for char, escaped_char in chars_to_escape.items():
-        json_string = json_string.replace(char, escaped_char)
-    
-    return json_string
-
-def parse_response(response_text):
-    # Convert the response text (JSON string) to a Python dictionary
-    response_dict = json.loads(escape_special_chars_in_json(response_text))
-
-    # Extract values directly from the dictionary
-    answer = response_dict.get("answer", "No answer provided.")
-    is_chart = response_dict.get("isChart", False)
-    chart_prompt = response_dict.get("chartPrompt", "")
-
-    return {
-        "answer": answer,
-        "isChart": is_chart,
-        "chartPrompt": chart_prompt
-    }
+def generate_chart(prompt) -> Image:
+    lida = Manager(text_gen = lidallm("openai"))
+    textgen_config = TextGenerationConfig(n=1, temperature=0.2, use_cache=True)
+    summary = lida.summarize(df, summary_method="default", textgen_config=textgen_config)
+    charts = lida.visualize(summary=summary,
+                            goal=prompt,
+                            textgen_config=textgen_config,
+                            library="matplotlib",
+                            return_error=True)  
+    image_base64 = charts[0].raster
+    chart = helper.base64_to_image(image_base64)
+    return chart
 
 
 col1, col2 = st.columns([3,4])
@@ -143,7 +136,7 @@ with col1:
         st.data_editor(df, height=545)  
         # st.dataframe(dataframe_explorer(df), use_container_width=True)
         
-        agent = create_agent_safely(llm, df)
+        agent = create_agent_safely(df)
 
 with col2:
     # To draw the border line
@@ -196,44 +189,33 @@ with col2:
                 # Generate a response from the agent
                 with st.spinner("Generating response..."):
                     try:
-                        # apiOutput = agent.invoke(create_chat_prompt(st.session_state.messages, prompt)).get("output")
-                        print(create_chat_prompt(st.session_state.messages, prompt))
-                        # apiOutput = """{"answer": "Here are three possible analyses you can perform on this dataset:\n\n1.", "isChart": "False", "chartPrompt": ""}"""
-                        # try: 
-                        #     responseDictionary = parse_response(apiOutput)
-                        #     # response = responseDictionary["answer"]
-                        # except Exception as e:
-                        #     print(f"Parsing error: {e}")
-
-                        response = "apiOutput"
-
-
-                        # response = "I am here to help you with your data exploration."
-
-                        # lida = Manager(text_gen = lidallm("openai"))
-                        # textgen_config = TextGenerationConfig(n=1, temperature=0.2, use_cache=True)
-                        # summary = lida.summarize(df, summary_method="default", textgen_config=textgen_config)
-                        # charts = lida.visualize(summary=summary,
-                        #                         goal=prompt,
-                        #                         textgen_config=textgen_config,
-                        #                         library="matplotlib",
-                        #                         return_error=True)  
-                        # image_base64 = charts[0].raster
-                        # img = helper.base64_to_image(image_base64)
-                        
-                        img = None
-
+                        apiOutput = agent.invoke(create_chat_prompt(st.session_state.messages, prompt)).get("output")
+                        agentResponse = parse_response(apiOutput)
+                        response = agentResponse.answer
                     except Exception as e:
-                        st.error(f"An error occurred: {e}")
+                        st.error(f"An error from agent: {e}")
+
+                # Generate a chart if necessary        
+                chart = None
+                if agentResponse.chartPrompt:
+                    with st.spinner("Creating chart..."):
+                        for attempt in range(3):  # Allows up to 3 attempts
+                            try:
+                                chart = generate_chart(agentResponse.chartPrompt)
+                                break
+                            except Exception as e:
+                                logging.error("Chart generation: %s", str(e))
+                                if attempt == 2:
+                                    st.error("Sorry, could not generate the chart.")
 
                 # Display the agent's response
                 with st.chat_message("assistant", avatar="✨"):
                     st.markdown(response)
-                    if img != None:
-                        st.image(img, width=500)
+                    if chart != None:
+                        st.image(chart, width=500)
 
                 # Append the agent's response to the chat history
-                st.session_state.messages.append({"role": "assistant", "content": response, "chart": img})
+                st.session_state.messages.append({"role": "assistant", "content": response, "chart": chart})
 
 
 
