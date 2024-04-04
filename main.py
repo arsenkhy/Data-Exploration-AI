@@ -3,6 +3,7 @@ import os
 from apikey import apikey
 from cohere import ChatMessage
 from openai import chat
+from requests import session
 from sklearn.utils import resample
 import streamlit as st
 from streamlit_extras.grid import grid
@@ -21,6 +22,7 @@ import logging
 import json
 import time
 import numpy as np
+import random
 
 from langchain import hub
 from langchain_openai import ChatOpenAI
@@ -53,7 +55,7 @@ def create_agent_safely(df):
                                                 df,
                                                 verbose=True,
                                                 agent_type=AgentType.OPENAI_FUNCTIONS,
-                                                handle_parsing_errors=True)
+                                                )
             return agent
         else:
             raise ValueError("DataFrame is not defined.")
@@ -65,8 +67,8 @@ def create_agent_safely(df):
 
 
 class AgentResponseSchema(BaseModel):
-    answer: str = Field(description="The direct answer derived from your the DataFrame analysis. Must be in markdown format")
-    chartPrompt: str = Field(description="If asked to create chart or visualize data, this field provides a prompt for another agent to create what chart it should create in detail. This prompt must include the title and type of chart. If no chart is necessary, leave this field empty.")
+    answer: str = Field(description="A string. The direct answer derived from your the DataFrame analysis. Must be in markdown format")
+    chartPrompt: str = Field(description="A string. If asked to create chart or visualize data, this field provides a prompt for another agent to create what chart it should create in detail. This prompt must include the title and type of chart. If no chart is necessary, leave this field empty.")
 
 parser = PydanticOutputParser(pydantic_object=AgentResponseSchema)
 
@@ -86,11 +88,10 @@ def create_chat_prompt(chat_history, user_question):
             "format_instructions": """The output must be formatted as a JSON
                                         instance that conforms to the JSON schema below.
                                         As an example, the schema {"answer": "The dataset has x number of rows",
-                                        "chartPrompt": "Descriptive chart creation prompt for another agent"} \nthe json 
-                                        is a well-formatted instance of the schema. The object {"answer": {"foo": ["bar", "baz"]}} is not well-formatted.""",
+                                        "chartPrompt": "Descriptive chart creation prompt for another agent with title"} \nthe json 
+                                        is a well-formatted instance of the schema.""",
         },
     )
-    print(prompt.format_prompt(question=user_question).to_messages())
 
     input_messages = prompt.format_prompt(question=user_question).to_messages()
 
@@ -129,6 +130,55 @@ def generate_chart(prompt, df) -> Image:
     chart = helper.base64_to_image(image_base64)
     return chart
 
+def generate_suggestions(df):
+    lida = Manager(text_gen = lidallm("openai"))
+    textgen_config = TextGenerationConfig(n=1, temperature=0.2, use_cache=True)
+    summary = lida.summarize(df, summary_method="default", textgen_config=textgen_config)
+    goals = lida.goals(summary, n=10, textgen_config=textgen_config)
+    return random.sample(goals, 2)
+
+
+def get_agent_response(messages, prompt):
+    with st.spinner("Generating response..."):
+        try:
+            api_output = agent.invoke(create_chat_prompt(messages, prompt)).get("output")
+            parsed_response = parse_response(api_output)
+        except Exception as e:
+            st.error(f"An error from agent: {e}")
+    return parsed_response
+
+def display_chart(chartPrompt, df):
+    chart = None
+    if chartPrompt:
+        with st.spinner("Creating chart..."):
+            for attempt in range(3):  # Allows up to 3 attempts
+                try:
+                    chart = generate_chart(chartPrompt, df)
+                    break
+                except Exception as e:
+                    logging.error("Chart generation: %s", str(e))
+                    if attempt == 2:
+                        st.error("Sorry, could not generate the chart.")
+    return chart
+
+def display_message_and_response(message):
+    # Append the user's message to the chat history
+    st.session_state.messages.append({"role": "user", "content": message})
+    with st.chat_message("user"):
+        st.markdown(message)
+    
+    agentResponse = get_agent_response(st.session_state.messages, message)
+    responseAnswer = agentResponse.answer
+    chart = display_chart(agentResponse.chartPrompt, filtered_df)
+
+    # Display the agent's response
+    with st.chat_message("assistant", avatar="✨"):
+        st.markdown(responseAnswer)
+        if chart != None:
+            st.image(chart, width=500)
+
+    # Append the agent's response to the chat history
+    st.session_state.messages.append({"role": "assistant", "content": responseAnswer, "chart": chart})
 
 col1, col2 = st.columns([3,4])
 
@@ -171,11 +221,20 @@ with col2:
                     with st.chat_message(message["role"]):
                         st.markdown(message["content"]) 
 
+            if "suggestions" not in st.session_state:
+                st.session_state.suggestions = []
+        
+            st.session_state.suggestionprompt = None
+
             # Suggestions
             if agent and suggestions_toggle:
+                if st.session_state.suggestions == []:
+                    st.session_state.suggestions = generate_suggestions(filtered_df)
+
+                goals = st.session_state.suggestions
                 with chat_grid.container():
                     with stylable_container(
-                    key="clear_chdaat",
+                    key="suggestion1",
                     css_styles="""
                         button {
                             background-color: black;
@@ -184,10 +243,12 @@ with col2:
                         }
                         """,
                     ):
-                        st.button("Clear chasftlksjhdlkfghsklfjghlksjhdglkjchasfftlksjhdlkfghsklfjghlksjhdglkj", key="clear_chdaat", use_container_width=True)
+                        if st.button(goals[0].question, key="suggestion1", use_container_width=True):
+                            st.session_state.suggestionprompt = goals[0].question
+
                 with chat_grid.container():    
                     with stylable_container(
-                    key="clear_chadt",
+                    key="suggestion2",
                     css_styles="""
                         button {
                             background-color: black;
@@ -196,69 +257,44 @@ with col2:
                         }
                         """,
                     ):
-                        st.button("Clear chatschasdstlksjhdlkfghsklfjghlksjhdglkj", key="clear_chadt", use_container_width=True)
+                        if st.button(goals[1].question, key="suggestion2", use_container_width=True):
+                            st.session_state.suggestionprompt = goals[1].question
             else: 
                 chat_grid.empty()
                 chat_grid.empty()
 
-
             # Chat input for new questions 
             prompt = chat_grid.chat_input("Message assistant...")
-            chat    = chat_grid.button("Clear chat", key="clear_chat")
+            chat   = chat_grid.button("Clear chat", key="clear_chat")
 
-
-            # Display welcome message
+            if st.session_state.suggestionprompt != None:
+                if agent is None:
+                    st.info("Please upload a dataset to start the chat.")
+                    st.stop()
+                display_message_and_response(st.session_state.suggestionprompt)
+                st.session_state.suggestions = generate_suggestions(filtered_df)
+                st.experimental_rerun()
+                
+            # Welcome message
             if prompt == None:
-                with st.container(height = 300, border=False):
+                if st.session_state.messages == []:
+                    with st.container(height = 300, border=False):
+                        st.empty()
+
+                    st.markdown(f"""
+                    <div style="text-align: center;">
+                        <div style="display: inline-block; width: 70px;">{helper.render_svg('assets/robot.svg')}</div>
+                        <p>How can I assist with your data?</p>
+                    </div>
+                    """, unsafe_allow_html=True)
+                else:
                     st.empty()
 
-                st.markdown(f"""
-                <div style="text-align: center;">
-                    <div style="display: inline-block; width: 70px;">{helper.render_svg('assets/robot.svg')}</div>
-                    <p>How can I assist with your data?</p>
-                </div>
-                """, unsafe_allow_html=True)
-
-            # Display chat messages
             else:
                 if agent is None:
                     st.info("Please upload a dataset to start the chat.")
                     st.stop()
-                # Append the user's message to the chat history
-                st.session_state.messages.append({"role": "user", "content": prompt})
-                with st.chat_message("user"):
-                    st.markdown(prompt)
-
-                # Generate a response from the agent
-                with st.spinner("Generating response..."):
-                    try:
-                        apiOutput = agent.invoke(create_chat_prompt(st.session_state.messages, prompt)).get("output")
-                        agentResponse = parse_response(apiOutput)
-                        response = agentResponse.answer
-                    except Exception as e:
-                        st.error(f"An error from agent: {e}")
-
-                # Generate a chart if necessary        
-                chart = None
-                if agentResponse.chartPrompt:
-                    with st.spinner("Creating chart..."):
-                        for attempt in range(3):  # Allows up to 3 attempts
-                            try:
-                                chart = generate_chart(agentResponse.chartPrompt, filtered_df)
-                                break
-                            except Exception as e:
-                                logging.error("Chart generation: %s", str(e))
-                                if attempt == 2:
-                                    st.error("Sorry, could not generate the chart.")
-
-                # Display the agent's response
-                with st.chat_message("assistant", avatar="✨"):
-                    st.markdown(response)
-                    if chart != None:
-                        st.image(chart, width=500)
-
-                # Append the agent's response to the chat history
-                st.session_state.messages.append({"role": "assistant", "content": response, "chart": chart})
+                display_message_and_response(prompt)
 
 
 
