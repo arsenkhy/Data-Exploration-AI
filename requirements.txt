@@ -1,0 +1,9 @@
+streamlit
+streamlit-extras
+streamlit-pandas-profiling
+python-dotenv
+Pillow
+lida
+langchain-openai
+langchain-experimental
+pydantic

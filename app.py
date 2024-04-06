@@ -5,6 +5,7 @@ from streamlit_extras.grid import grid
 from streamlit_extras.dataframe_explorer import dataframe_explorer
 from streamlit_extras.stylable_container import stylable_container
 from dotenv import load_dotenv
+from sympy import use
 load_dotenv()
 
 # Custom imports
@@ -46,6 +47,13 @@ def display_message_and_response(message, agent):
     # Append the agent's response to the chat history
     st.session_state.messages.append({"role": "assistant", "content": responseAnswer, "chart": chart})
 
+def reset_session():
+    st.session_state.messages = []
+    st.session_state.suggestions = []
+
+def clear_chat():
+    st.session_state.messages = []
+    st.rerun()
 
 # App UI
 st.set_page_config(
@@ -59,19 +67,55 @@ st.title('Dataset Exploration')
 col1, col2 = st.columns([3,4])
 
 with col1:
-    # Load data
-    uploaded_file = st.file_uploader("Upload your dataset", type=['csv'])
-
     df = None  
     agent = None
+    uploaded_file = st.file_uploader("Upload your dataset", type=['csv'])
+
+    if "dataset" not in st.session_state:
+        st.session_state.dataset = None
+
+    # User uploaded file
     if uploaded_file is not None:
+        if st.session_state.dataset != None:
+            reset_session()
+        st.session_state.dataset = None
         df = pd.read_csv(uploaded_file)
-        
-        # Display the DataFrame
-        st.subheader("Current dataframe:", divider='blue')
+
+    # Dropdown selection
+    else:   
+        option1 = "Online Food Order Dataset"
+        option2 = "Heart Attack Prediction"
+        option3 = "Student Study Performance"
+        dataset_option = st.selectbox("or try sample datasets",
+                                        options=[option1, option2, option3],
+                                        index=None)
+        if dataset_option == option1:
+            if st.session_state.dataset != option1:
+                reset_session()
+                st.session_state.dataset = option1
+            df = pd.read_csv("onlinefoods.csv")
+
+        elif dataset_option == option2:
+            if st.session_state.dataset != option2:
+                reset_session()
+                st.session_state.dataset = option2
+            df = pd.read_csv("heart_attack_prediction_dataset.csv")
+
+        elif dataset_option == option3:
+            if st.session_state.dataset != option3:
+                reset_session()
+                st.session_state.dataset = option3
+            df = pd.read_csv("study_performance.csv")
+    
+    # Create and display the DataFrame
+    if df is not None:
         filtered_df = dataframe_explorer(df, case=False)
-        st.data_editor(filtered_df, height=545)  
         agent = openai_agent.create_agent_safely(filtered_df)
+        st.subheader("Current dataframe:", divider='blue')
+        st.dataframe(filtered_df, height=400)
+    else:
+        st.session_state.messages = []
+        st.session_state.suggestions = []
 
 with col2:
     suggestions_toggle = st.toggle("Enable suggestions", False)
@@ -80,7 +124,7 @@ with col2:
     with container.container():
 
         chat_grid = grid(1, [1, 1], [7, 1],  vertical_align="center")
-        with chat_grid.container(height = 700, border=False):
+        with chat_grid.container(height = 550, border=False):
 
             # Messages
             if "messages" not in st.session_state:
@@ -110,29 +154,29 @@ with col2:
                 goals = st.session_state.suggestions
                 with chat_grid.container():
                     with stylable_container(
-                    key="suggestion1",
-                    css_styles="""
-                        button {
-                            background-color: black;
-                            color: white;
-                            border-radius: 20px;
-                        }
-                        """,
-                    ):
+                        key="suggestion1",
+                        css_styles="""
+                            button {
+                                background-color: #202020;
+                                border-radius: 5px;
+                                height: 50px;
+                            }
+                            """,
+                        ):
                         if st.button(goals[0].question, key="suggestion1", use_container_width=True):
                             st.session_state.suggestionprompt = goals[0].question
 
                 with chat_grid.container():    
                     with stylable_container(
-                    key="suggestion2",
-                    css_styles="""
-                        button {
-                            background-color: black;
-                            color: white;
-                            border-radius: 20px;
-                        }
-                        """,
-                    ):
+                        key="suggestion2",
+                        css_styles="""
+                            button {
+                                background-color: #202020;
+                                border-radius: 5px;
+                                height: 50px;
+                            }
+                            """,
+                        ):
                         if st.button(goals[1].question, key="suggestion2", use_container_width=True):
                             st.session_state.suggestionprompt = goals[1].question
             else: 
@@ -141,7 +185,9 @@ with col2:
 
             # Chat input for new questions 
             prompt = chat_grid.chat_input("Message assistant...")
-            chat   = chat_grid.button("Clear chat", key="clear_chat")
+            clear_chat_button   = chat_grid.button("Clear chat", key="clear_chat", use_container_width=True)
+            if clear_chat_button:
+                clear_chat()
 
             if st.session_state.suggestionprompt != None:
                 if agent is None:
@@ -149,12 +195,12 @@ with col2:
                     st.stop()
                 display_message_and_response(st.session_state.suggestionprompt, agent)
                 st.session_state.suggestions = lida_chart.generate_suggestions(filtered_df)
-                st.experimental_rerun()
+                st.rerun()
                 
             # Welcome message
             if prompt == None:
                 if st.session_state.messages == []:
-                    with st.container(height = 300, border=False):
+                    with st.container(height = 200, border=False):
                         st.empty()
 
                     st.markdown(f"""
