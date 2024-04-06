@@ -9,7 +9,7 @@ import helper
 
 def generate_chart(prompt, df) -> Image:
     lida = Manager(text_gen = lidallm("openai"))
-    textgen_config = TextGenerationConfig(n=1, temperature=0.2, use_cache=True)
+    textgen_config = TextGenerationConfig(n=1, temperature=0.1, use_cache=True)
     summary = lida.summarize(df, summary_method="default", textgen_config=textgen_config)
     charts = lida.visualize(summary=summary,
                             goal=prompt,
@@ -22,7 +22,7 @@ def generate_chart(prompt, df) -> Image:
 
 def generate_suggestions(df):
     lida = Manager(text_gen = lidallm("openai"))
-    textgen_config = TextGenerationConfig(n=1, temperature=0.2, use_cache=True)
+    textgen_config = TextGenerationConfig(n=1, temperature=0.1, use_cache=True)
     summary = lida.summarize(df, summary_method="default", textgen_config=textgen_config)
     goals = lida.goals(summary, n=10, textgen_config=textgen_config)
     return random.sample(goals, 2)

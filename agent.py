@@ -13,7 +13,6 @@ from typing import List
 from dotenv import load_dotenv
 load_dotenv()
 
-
 def create_agent_safely(df):
     try:
         if df is not None:
@@ -41,7 +40,15 @@ def get_agent_response(messages, prompt, agent):
 
 class AgentResponseSchema(BaseModel):
     answer: str = Field(description="A string. The direct answer derived from your the DataFrame analysis. Must be in markdown format")
-    chartPrompt: str = Field(description="A string. If asked to create chart or visualize data, this field provides a prompt for another agent to create what chart it should create in detail. This prompt must include the title and type of chart. If no chart is necessary, leave this field empty.")
+    chartPrompt: str = Field(description="""A string. If asked to create chart or visualize data, this field provides a prompt for another
+                            agent to create what chart it should create in detail.
+                            If user has not specified to show the chart or visualize data, you must leave this field empty. Good examples: 
+                            
+                            1. User: Create a chart showing the [user interest]
+                            Your response: "Create a [type of chart] chart showing the [user interest]. Title: [title of chart]
+                            2. User: How many instances in dataset? 
+                            Your response: "" 
+                            These examples show the good format of the chart prompt as it includes the title and leaves the field empty if user has not asked for chart""")
 
 parser = PydanticOutputParser(pydantic_object=AgentResponseSchema)
 
@@ -58,11 +65,11 @@ def create_chat_prompt(chat_history, user_question):
         ],
         input_variables=["question"],
         partial_variables={
-            "format_instructions": """The output must be formatted as a JSON
+            "format_instructions": parser.get_format_instructions() + """The output must be formatted as a JSON
                                         instance that conforms to the JSON schema below.
                                         As an example, the schema {"answer": "The dataset has x number of rows",
                                         "chartPrompt": "Descriptive chart creation prompt for another agent with title"} \nthe json 
-                                        is a well-formatted instance of the schema.""",
+                                        is a well-formatted instance of the schema. """,
         },
     )
 
@@ -70,6 +77,7 @@ def create_chat_prompt(chat_history, user_question):
 
     return {"input": input_messages}
 
+# This code was generated with the help of ChatGPT, but has been edited
 def parse_response(response_text) -> AgentResponseSchema:
     # Sometimes the JSON-like substring is not valid JSON, so need to extract it manually
     pattern = r'''\{\s*"answer":\s*".*?",\s*"chartPrompt":\s*".*?"\s*\}'''

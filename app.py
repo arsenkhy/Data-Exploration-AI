@@ -5,7 +5,6 @@ from streamlit_extras.grid import grid
 from streamlit_extras.dataframe_explorer import dataframe_explorer
 from streamlit_extras.stylable_container import stylable_container
 from dotenv import load_dotenv
-from sympy import use
 load_dotenv()
 
 # Custom imports
@@ -29,7 +28,6 @@ def display_chart(chartPrompt, df):
     return chart
 
 def display_message_and_response(message, agent):
-    # Append the user's message to the chat history
     st.session_state.messages.append({"role": "user", "content": message})
     with st.chat_message("user"):
         st.markdown(message)
@@ -38,7 +36,6 @@ def display_message_and_response(message, agent):
     responseAnswer = agentResponse.answer
     chart = display_chart(agentResponse.chartPrompt, filtered_df)
 
-    # Display the agent's response
     with st.chat_message("assistant", avatar="✨"):
         st.markdown(responseAnswer)
         if chart != None:
@@ -84,7 +81,7 @@ with col1:
     # Dropdown selection
     else:   
         option1 = "Online Food Order Dataset"
-        option2 = "Heart Attack Prediction"
+        option2 = "Most watched Netflix original shows"
         option3 = "Student Study Performance"
         dataset_option = st.selectbox("or try sample datasets",
                                         options=[option1, option2, option3],
@@ -99,7 +96,7 @@ with col1:
             if st.session_state.dataset != option2:
                 reset_session()
                 st.session_state.dataset = option2
-            df = pd.read_csv("heart_attack_prediction_dataset.csv")
+            df = pd.read_csv("imdb.csv")
 
         elif dataset_option == option3:
             if st.session_state.dataset != option3:
@@ -220,15 +217,16 @@ with col2:
 
 
 
-
-
-
-
-
 # Sidebar
 with st.sidebar:
-    st.divider()
+    st.title("About")
+    st.caption("""Quickly understand your datasets!
+            Simply upload your data and use OpenAI's GPT-4 powered
+            assistant to ask questions and get insights for your data. Effortlessly
+            create visualizations with natural language commands.
+            Perfect for anyone looking to streamline their data analysis process""")
 
+    st.divider()
     # Github link
     col1, col2 = st.columns([1, 7], gap='small') 
 
